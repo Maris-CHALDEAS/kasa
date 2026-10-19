@@ -1,5 +1,7 @@
 #include <stdio.h>
 
+extern int fun;
+
 int main() {
-	printf("Hello from the file produced by the build system");
+	printf("%d\n",fun);	
 }
