@@ -1,28 +1,12 @@
-#include <seibah/kasa/kasa.h>
-
-bool add_compiler(comp_t *com)
-{
-    return kasa_push(com, "cc");
-}
-bool add_flags(comp_t *com)
-{
-    return kasa_push(com, "-Werror");
-}
-bool add_files(comp_t *com)
-{
-    return kasa_push(com, "main.c", "fun.c");
-}
-bool add_output(comp_t *com)
-{
-    return kasa_push(com, "-o", "kasa_generated");
-}
+#include "kasa.h"
 
 int main(int argc, char* argv[])
 {
-    comp_t com = { 0 };
-    com.target = LINUX;
-    bool success = add_compiler(&com) && add_flags(&com) && add_files(&com) && add_output(&com) && kasa_exec(&com);
-    kasa_destroy(&com);
-    return success ? 0 : 1;
+    kasa_project("App");
+    kasa_compiler("cc");
+    kasa_sources("main.c", "fun.c");
+    kasa_cflags("-Wall", "-Werror");
+    kasa_output("App");
+    kasa_build();
+    kasa_destroy();
 }
-
