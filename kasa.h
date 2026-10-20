@@ -43,7 +43,7 @@
       header = realloc(header, (sizeof(*array) * header->capacity) + sizeof(Header));             \
       array = (void *)(header + 1);                                                               \
     };                                                                                            \
-    array[header->count++] = element;                                                             \
+    (array)[header->count++] = element;                                                           \
   } while(0)
 
 #define array_free(array) free((Header *)(array) - 1)
@@ -68,6 +68,7 @@ typedef struct {
 	char target;
     char *AppName;
     char *output;
+    char *compiler;
 	char **arr;
 } kasa_t;
 
@@ -136,11 +137,11 @@ internal bool kasa_push_impl(kasa_t *com, ...)
 internal void exitreason(pid_t cid, int status)
 {
 	if (WIFEXITED(status)) {
-		printf("child %d terminated normally, that is, by calling "
+		printf("[KASA] child %d terminated normally, that is, by calling "
 		       "exit(3) or _exit(2), or by returning from main().\n",
 		    cid);
 		if (WEXITSTATUS(status)) {
-			printf("child %d exit status %d.  This consists of "
+			printf("[KASA] child %d exit status %d.  This consists of "
 			       "the least significant 8 bits of the status "
 			       "argument that the child specified in a call "
 			       "to exit(3) or _exit(2) or as the argument for "
@@ -149,14 +150,14 @@ internal void exitreason(pid_t cid, int status)
 		}
 	}
 	if (WIFSIGNALED(status)) {
-		printf("child %d process was terminated by a signal.\n", cid);
+		printf("[KASA] child %d process was terminated by a signal.\n", cid);
 		if (WTERMSIG(status)) {
-			printf("child %d signal %d that caused the child "
+			printf("[KASA] child %d signal %d that caused the child "
 			       "process to terminate.\n",
 			    cid, WTERMSIG(status));
 		}
 		if (WCOREDUMP(status)) {
-			printf("child %d produced a core dump.  WCOREDUMP() "
+			printf("[KASA] child %d produced a core dump.  WCOREDUMP() "
 			       "is not specified in POSIX.1-2001 and is not "
 			       "available on some UNIX implementations (e.g., "
 			       "AIX, SunOS).  Only use this enclosed in "
@@ -165,20 +166,20 @@ internal void exitreason(pid_t cid, int status)
 		}
 	}
 	if (WIFSTOPPED(status)) {
-		printf("child %d process was stopped by delivery of a signal; "
+		printf("[KASA] child %d process was stopped by delivery of a signal; "
 		       "this is only possible if the call was done using "
 		       "WUNTRACED or when the child is being traced (see "
 		       "ptrace(2)).\n",
 		    cid);
 		if (WSTOPSIG(status)) {
-			printf("child %d number of the signal which caused "
+			printf("[KASA] child %d number of the signal which caused "
 			       "the child to stop.\n",
 			    cid);
 		}
 	}
 	if (WIFCONTINUED(status)) {
 		printf(
-		    "child %d process was resumed by delivery of SIGCONT.\n",
+		    "[KASA] child %d process was resumed by delivery of SIGCONT.\n",
 		    cid);
 	}
 }
@@ -191,19 +192,19 @@ internal bool kasa_exec_impl(kasa_t *com)
 	int status = 0;
 	if (pid == 0) {
 		execvp(com->arr[0], com->arr);
-		perror("execvp exited abnormally");
+		perror("[KASA] execvp exited abnormally\n");
 		_exit(127);
 		return false;
 	} else if (pid > 0) {
 		pid_t cidX = waitpid(pid, &status, waitoptions);
-		printf("child1: %d\n", pid);
+		printf("[KASA] child: %d\n", pid);
 		exitreason(pid, status);
 		if (!(cidX < 0) && status == 0) {
 			return true;
 		}
 		return (false);
 	} else {
-		printf("child fork failed");
+		printf("[KASA] child fork failed\n");
 		return false;
 	}
 	return true;
@@ -234,21 +235,159 @@ internal void kasa_project(char *app)
 
 internal void kasa_args_print(kasa_t *com)
 {
+    printf("[KASA] ");
     for (int i = 0; i < array_length(com->arr); i++) {
         printf("%s ", com->arr[i]);
     }
     printf("\n");
 }
 
-#define kasa_sources_impl(A, ...) kasa_push(A, __VA_ARGS__)
-#define kasa_sources(...) kasa_sources_impl(&seibah_kasa_config, __VA_ARGS__)
+internal int isReadable(const char *source)
+{
+#ifdef WIN32
+#else
+	if (access(source, R_OK) == 0) {
+        return 1;
+	}
+    return 0;
+
+#endif // WIN32
+}
+
+
+void kasa_sources_impl(kasa_t *com, ...)
+{
+    bool success = true;
+	va_list args;
+	va_start(args, com);
+	char *source = va_arg(args, char *);
+	while (source != NULL) {
+		if (isReadable(source)) {
+            fprintf(stderr, "[KASA] File found: %s\n", source);
+            array_push(com->arr, source);
+		} else {
+            success = false;
+            fprintf(stderr, "[KASA] File not found: %s\n", source);
+		}
+		source = va_arg(args, char *);
+	}
+    if (!success) {
+        fprintf(stderr,
+            "All given source files not found.\nStopping the build process!\n");
+        _exit(2);
+        return;
+    }
+}
+#define kasa_sources(...) kasa_sources_impl(&seibah_kasa_config, __VA_ARGS__, (char*)NULL)
 
 #define kasa_cflags_impl(A, ...) kasa_push(A, __VA_ARGS__)
 #define kasa_cflags(...)	  kasa_cflags_impl(&seibah_kasa_config, __VA_ARGS__)
 
+internal int isExecutable(const char *source)
+{
+#ifdef WIN32
+#else
+	if (access(source, X_OK) == 0) {
+        return 1;
+	}
+    return 0;
+#endif // WIN32
+}
 
-#define kasa_compiler_impl(A, ...) kasa_push(A, __VA_ARGS__)
-#define kasa_compiler(...)	  kasa_compiler_impl(&seibah_kasa_config, __VA_ARGS__)
+internal int kasa_str_pos_find(const char *paths, char chr)
+{
+    int pos = -1;
+    int i = 0;
+    while (paths[i] != '\0') {
+	    if (paths[i] == chr) {
+		    pos = i;
+		    break;
+        }
+	    i++;
+    }
+    return pos;
+}
+internal void kasa_substr(const char *paths, int start, int size, char **ans)
+{
+	char res[size + 1];
+	for (int i = 0; i < size; i++) {
+        res[i] = paths[i+start];
+	}
+	res[size] = '\0';
+	*ans = res;
+}
+
+internal void kasa_split_string(const char *paths, char ***arr, char a)
+{
+	int pos = kasa_str_pos_find(paths, a);
+	int initPos = 0;
+	*arr = NULL;
+    char *res;
+	while (pos != -1) {
+        pos += initPos;
+        kasa_substr(paths ,initPos, pos - initPos, &res);
+        array_push(*arr, res);
+        initPos = pos + 1;
+        pos = kasa_str_pos_find(paths + initPos, a);
+	}
+    kasa_substr(paths ,initPos, strlen(paths)+1, &res);
+	array_push(*arr, res);
+}
+
+bool compilerExistenceOnPath(kasa_t *com, char *compiler)
+{
+	bool isPresent = false;
+	const char *env = getenv("PATH");
+	const char *paths = env ? env : "";
+	if ((strcmp(paths, "")) == 0) {
+        return isExecutable((compiler));
+	}
+	char **arr = NULL;
+	kasa_split_string(paths, &arr, ':');
+	if (arr == NULL) {
+		fprintf(stdout,"PATH parsing failed");
+        _exit(126);
+    }
+    char path[512] = "";
+	for (int i = 0; i < array_length(arr); i++) {
+		strcpy(path, arr[i]);
+		strcat(path, "/");
+		strcat(path, compiler);
+		if (isExecutable(path)) {
+			com->compiler = compiler;
+			isPresent = true;
+            break;
+        }
+	}
+    array_free(arr);
+	return isPresent;
+}
+
+void kasa_compiler_impl(kasa_t *com, ...)
+{
+	va_list args;
+	va_start(args, com);
+	char *compiler = va_arg(args, char *);
+    bool success = false;
+	while (compiler != NULL) {
+		if (compilerExistenceOnPath(com, compiler)) {
+            array_push(com->arr, compiler);
+            success = true;
+            fprintf(stdout, "[KASA] Compiler %s found\n", compiler);
+            break;
+		}
+        fprintf(stdout, "[KASA] Compiler %s not found\n", compiler);
+		compiler = va_arg(args, char *);
+    }
+
+    // TODO(souls): Try to not exit prematurely we will try to verify as many things as possible(like missing source files) so to give detailed view to the user;
+	if (!success) {
+		fprintf(stderr, "[KASA] None of the provided compiler on PATH\nStopping the execution\n");
+        _exit(126);
+	}
+}
+
+#define kasa_compiler(...)	  kasa_compiler_impl(&seibah_kasa_config, __VA_ARGS__, (char *)NULL)
 
 #define kasa_build() kasa_exec_impl(&seibah_kasa_config)
 
@@ -269,22 +408,22 @@ void kasa_output_impl(kasa_t *com, char *output)
 bool kasa_run_impl(kasa_t *com)
 {
     kasa_build();
-    printf("building...");
+    printf("[KASA] building...\n");
     char prefix[128] = "./";
     if (strlen(com->output) > 125) {
-        fprintf(stderr, "Execution File name length exceeds supported size: 125 char");
+        fprintf(stderr, "[KASA] Execution File name length exceeds supported size: 125 char");
         return false;
     }
 	strcat(prefix, com->output);
 	char *args[] = {prefix, NULL};
 	pid_t cid = fork();
 	if (cid == 0) {
-        fprintf(stderr, "[kasa] executing: %s\n", com->arr[0]);
+        fprintf(stderr, "[KASA] executing: %s\n", com->arr[0]);
 		if (execv(args[0], args)) {
-			perror("Error encountered while trying to run the "
-			       "program");
-			printf("Check weather the executable file is present "
-			       "in the current directory");
+			perror("[KASA] Error encountered while trying to run the "
+			       "program\n");
+			printf("[KASA] Check weather the executable file is present "
+			       "in the current directory\n");
 			_exit(127);
             return false;
         }
@@ -292,14 +431,14 @@ bool kasa_run_impl(kasa_t *com)
 		int status = 0;
 		int waitoptions = 0;
 		pid_t cidx = waitpid(cid, &status, waitoptions);
-		printf("child: %d\n", cid);
+		printf("[KASA] child: %d\n", cid);
 		exitreason(cid, status);
 		if ((cidx >= 0) && status == 0) {
             return true;
 		}
 		return false;
 	} else {
-		printf("Child fork failed during file execution");
+		printf("[KASA] Child fork failed during file execution\n");
 		return false;
     }
     return true;
@@ -326,7 +465,7 @@ int kasa_dispatch(int argc, char **argv)
 	if (argc == 1) {
         return 0;
 	} else if (argc > 2) {
-        printf("exceeds the number of arguments required");
+        printf("[KASA] Exceeds the number of arguments required(2)\n");
         return 1;
 	} else {
 		if ((strcmp(argv[1], "build")) == 0) {
@@ -334,7 +473,6 @@ int kasa_dispatch(int argc, char **argv)
             return 0;
 		}
 		if ((strcmp(argv[1], "run")) == 0) {
-            printf("Hello");
             kasa_run();
             return 0;
         }
@@ -343,5 +481,4 @@ int kasa_dispatch(int argc, char **argv)
 }
 
 #endif // !KASA_CUSTOM
-
 #endif // MAIN_H_
