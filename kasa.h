@@ -20,15 +20,23 @@
 #include <string.h>
 
 
-/* Definations */
+/** @name Storage-class aliases
+ * @{ */
 #define internal	static
 #define local_persist	static
 #define global_variable static
+/** @} */
 
+/** Initial capacity used for dynamically allocated arrays. */
 #define ARRAY_INIT_CAPACITY 20
 
 
 
+/**
+ * @brief Append an element to a header-backed dynamic array.
+ * @param array Array pointer; initialized on first use when it is `NULL`.
+ * @param element Element to append.
+ */
 #define array_push(array, element)                                                                \
   do {                                                                                            \
     if (array == NULL) {                                                                          \
@@ -46,24 +54,28 @@
     (array)[header->count++] = element;                                                           \
   } while(0)
 
+/** Release a dynamic array allocated by @ref array_push. */
 #define array_free(array) free((Header *)(array) - 1)
 
+/** Return the element count of a non-NULL dynamic array. */
 #define array_length(array) ((Header *)(array) - 1)->count
 
+/** Append a NULL-terminated list of strings to a command. */
 #define kasa_push(A, ...) kasa_push_impl(A, __VA_ARGS__, (char *)NULL)
 
-/* enums */
+/** Supported build target platforms. */
 enum target {
 	WIN32,
 	LINUX,
 };
 
-/* struct definations */
+/** Metadata stored immediately before a dynamic array's elements. */
 typedef struct {
 	size_t count;
 	size_t capacity;
 } Header;
 
+/** Build configuration and compiler argument list. */
 typedef struct {
 	char target;
     char *AppName;
@@ -73,7 +85,7 @@ typedef struct {
 } kasa_t;
 
 
-/* Global Variables */
+/** Process-wide configuration used by Kasa's convenience macros. */
 
 global_variable kasa_t seibah_kasa_config;
 
@@ -101,6 +113,12 @@ internal bool kasa_push_impl(kasa_t *, ...);
  */
 internal bool kasa_exec_impl(kasa_t *com);
 
+/**
+ * @brief Append a NULL-terminated list of strings to a command argument array.
+ * @param com Command whose @c arr member receives the arguments.
+ * @param ... Argument strings, terminated by a NULL pointer.
+ * @return Always true after appending the supplied arguments.
+ */
 internal bool kasa_push_impl(kasa_t *com, ...)
 {
 	va_list args;
@@ -114,6 +132,14 @@ internal bool kasa_push_impl(kasa_t *com, ...)
 	return true;
 }
 
+/**
+ * @brief Report how a child process terminated or changed state.
+ * @param cid Process ID of the child.
+ * @param status Status value returned by @c waitpid.
+ *
+ * Reports normal exit, signal termination, stopping, and continuation states
+ * according to the corresponding wait-status macros.
+ */
 // WIFEXITED(status) returns true if the child terminated normally, that is, by
 // calling exit(3) or _exit(2), or by returning from main().
 // WEXITSTATUS(status) returns the exit status of the child.  This consists of
@@ -226,13 +252,14 @@ internal void kasa_destroy_impl(kasa_t *com)
 	array_free(com->arr);
 }
 
-
+/** Initialize the global build configuration for an application. */
 internal void kasa_project(char *app)
 {
     seibah_kasa_config = (kasa_t){ 0 };
     seibah_kasa_config.AppName = app;
 }
 
+/** Print the current compiler argument list. */
 internal void kasa_args_print(kasa_t *com)
 {
     printf("[KASA] ");
@@ -242,6 +269,7 @@ internal void kasa_args_print(kasa_t *com)
     printf("\n");
 }
 
+/** @brief Check whether a path is readable. @return 1 if readable, else 0. */
 internal int isReadable(const char *source)
 {
 #ifdef WIN32
@@ -255,7 +283,13 @@ internal int isReadable(const char *source)
 }
 
 
-void kasa_sources_impl(kasa_t *com, ...)
+/**
+ * @brief Add readable source paths to a command.
+ * @param com Command that receives the source paths.
+ * @param ... Source path strings, terminated by a NULL pointer.
+ * @note If any path is unreadable, this routine reports the error and exits.
+ */
+internal void kasa_sources_impl(kasa_t *com, ...)
 {
     bool success = true;
 	va_list args;
@@ -280,9 +314,11 @@ void kasa_sources_impl(kasa_t *com, ...)
 }
 #define kasa_sources(...) kasa_sources_impl(&seibah_kasa_config, __VA_ARGS__, (char*)NULL)
 
+/** Append compiler flags to a command argument list. */
 #define kasa_cflags_impl(A, ...) kasa_push(A, __VA_ARGS__)
 #define kasa_cflags(...)	  kasa_cflags_impl(&seibah_kasa_config, __VA_ARGS__)
 
+/** @brief Check whether a path names an executable file. */
 internal int isExecutable(const char *source)
 {
 #ifdef WIN32
@@ -294,6 +330,7 @@ internal int isExecutable(const char *source)
 #endif // WIN32
 }
 
+/** @brief Find a character's first index, or -1 when absent. */
 internal int kasa_str_pos_find(const char *paths, char chr)
 {
     int pos = -1;
@@ -307,6 +344,7 @@ internal int kasa_str_pos_find(const char *paths, char chr)
     }
     return pos;
 }
+/** Copy a substring into a terminated buffer and store its address in @p ans. */
 internal void kasa_substr(const char *paths, int start, int size, char **ans)
 {
 	char res[size + 1];
@@ -317,6 +355,7 @@ internal void kasa_substr(const char *paths, int start, int size, char **ans)
 	*ans = res;
 }
 
+/** Split a string at each delimiter into a dynamic array of strings. */
 internal void kasa_split_string(const char *paths, char ***arr, char a)
 {
 	int pos = kasa_str_pos_find(paths, a);
@@ -334,7 +373,13 @@ internal void kasa_split_string(const char *paths, char ***arr, char a)
 	array_push(*arr, res);
 }
 
-bool compilerExistenceOnPath(kasa_t *com, char *compiler)
+/**
+ * @brief Search PATH for a compiler executable.
+ * @param com Configuration updated with the selected compiler.
+ * @param compiler Executable name to search for.
+ * @return true if found, otherwise false.
+ */
+internal bool compilerExistenceOnPath(kasa_t *com, char *compiler)
 {
 	bool isPresent = false;
 	const char *env = getenv("PATH");
@@ -363,7 +408,13 @@ bool compilerExistenceOnPath(kasa_t *com, char *compiler)
 	return isPresent;
 }
 
-void kasa_compiler_impl(kasa_t *com, ...)
+/**
+ * @brief Select the first available compiler from a NULL-terminated list.
+ * @param com Configuration that receives the selected compiler argument.
+ * @param ... Compiler executable names, terminated by a NULL pointer.
+ * @note Exits the process if none of the supplied compilers is found.
+ */
+internal void kasa_compiler_impl(kasa_t *com, ...)
 {
 	va_list args;
 	va_start(args, com);
@@ -389,23 +440,30 @@ void kasa_compiler_impl(kasa_t *com, ...)
 
 #define kasa_compiler(...)	  kasa_compiler_impl(&seibah_kasa_config, __VA_ARGS__, (char *)NULL)
 
+/** Build the configured command and wait for it to finish. */
 #define kasa_build() kasa_exec_impl(&seibah_kasa_config)
 
+/** Release the argument array held by the global configuration. */
 #define kasa_destroy() kasa_destroy_impl(&seibah_kasa_config)
 
+/** Print the global configuration's current argument list. */
 #define kasa_print() kasa_args_print(&seibah_kasa_config)
 
+/** Set the output filename and append the compiler's `-o` option. */
 #define kasa_output(A) kasa_output_impl(&seibah_kasa_config, A);
 
-void kasa_output_impl(kasa_t *com, char *output)
+/** Store an output filename and append the corresponding compiler options. */
+internal void kasa_output_impl(kasa_t *com, char *output)
 {
 	com->output = output;
     kasa_push(com, "-o", output);
 }
 
+/** Build the configured command and run its output executable. */
 #define kasa_run() kasa_run_impl(&seibah_kasa_config)
 
-bool kasa_run_impl(kasa_t *com)
+/** @brief Build the command and execute its output file. */
+internal bool kasa_run_impl(kasa_t *com)
 {
     kasa_build();
     printf("[KASA] building...\n");
@@ -445,13 +503,17 @@ bool kasa_run_impl(kasa_t *com)
 }
 
 #ifndef KASA_CUSTOM
+/** Set nonzero to provide a custom entry point and dispatcher. */
 #define KASA_CUSTOM 0
 #endif // KASA_CUSTOM
 
 #if !KASA_CUSTOM
 
-void kasa_config(void);
-int kasa_dispatch(int argc, char *argv[]);
+/** Configure the global Kasa build command; defined by the including program. */
+internal void kasa_config(void);
+/** Dispatch the requested command-line action. */
+internal int kasa_dispatch(int argc, char *argv[]);
+/** Default entry point, enabled unless @ref KASA_CUSTOM is nonzero. */
 int main(int argc, char *argv[])
 {
 	kasa_config();
@@ -460,7 +522,13 @@ int main(int argc, char *argv[])
 	return val;
 }
 
-int kasa_dispatch(int argc, char **argv)
+/**
+ * @brief Dispatch the supported command-line action.
+ * @param argc Number of command-line arguments.
+ * @param argv Argument vector; supported actions are `build` and `run`.
+ * @return 0 for no action or a handled action, 1 when too many args are given.
+ */
+internal int kasa_dispatch(int argc, char **argv)
 {
 	if (argc == 1) {
         return 0;
