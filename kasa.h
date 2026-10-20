@@ -1,6 +1,13 @@
 #ifndef MAIN_H_
 #define MAIN_H_
+
+#ifdef WIN32
+
+#else
+
 #define _DEFAULT_SOURCE
+
+#endif // WIN32
 
 #include <stdarg.h>
 #include <stdbool.h>
@@ -10,6 +17,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <wait.h>
+#include <string.h>
+
 
 /* Definations */
 #define internal	static
@@ -58,6 +67,7 @@ typedef struct {
 typedef struct {
 	char target;
     char *AppName;
+    char *output;
 	char **arr;
 } kasa_t;
 
@@ -246,6 +256,92 @@ internal void kasa_args_print(kasa_t *com)
 
 #define kasa_print() kasa_args_print(&seibah_kasa_config)
 
-#define kasa_output(A) kasa_push(&seibah_kasa_config, "-o", A);
+#define kasa_output(A) kasa_output_impl(&seibah_kasa_config, A);
+
+void kasa_output_impl(kasa_t *com, char *output)
+{
+	com->output = output;
+    kasa_push(com, "-o", output);
+}
+
+#define kasa_run() kasa_run_impl(&seibah_kasa_config)
+
+bool kasa_run_impl(kasa_t *com)
+{
+    kasa_build();
+    printf("building...");
+    char prefix[128] = "./";
+    if (strlen(com->output) > 125) {
+        fprintf(stderr, "Execution File name length exceeds supported size: 125 char");
+        return false;
+    }
+	strcat(prefix, com->output);
+	char *args[] = {prefix, NULL};
+	pid_t cid = fork();
+	if (cid == 0) {
+        fprintf(stderr, "[kasa] executing: %s\n", com->arr[0]);
+		if (execv(args[0], args)) {
+			perror("Error encountered while trying to run the "
+			       "program");
+			printf("Check weather the executable file is present "
+			       "in the current directory");
+			_exit(127);
+            return false;
+        }
+	} else if (cid > 0) {
+		int status = 0;
+		int waitoptions = 0;
+		pid_t cidx = waitpid(cid, &status, waitoptions);
+		printf("child: %d\n", cid);
+		exitreason(cid, status);
+		if ((cidx >= 0) && status == 0) {
+            return true;
+		}
+		return false;
+	} else {
+		printf("Child fork failed during file execution");
+		return false;
+    }
+    return true;
+}
+
+#ifndef KASA_CUSTOM
+#define KASA_CUSTOM 0
+#endif // KASA_CUSTOM
+
+#if !KASA_CUSTOM
+
+void kasa_config(void);
+int kasa_dispatch(int argc, char *argv[]);
+int main(int argc, char *argv[])
+{
+	kasa_config();
+	int val = kasa_dispatch(argc, argv);
+	kasa_destroy();
+	return val;
+}
+
+int kasa_dispatch(int argc, char **argv)
+{
+	if (argc == 1) {
+        return 0;
+	} else if (argc > 2) {
+        printf("exceeds the number of arguments required");
+        return 1;
+	} else {
+		if ((strcmp(argv[1], "build")) == 0) {
+            kasa_build();
+            return 0;
+		}
+		if ((strcmp(argv[1], "run")) == 0) {
+            printf("Hello");
+            kasa_run();
+            return 0;
+        }
+	}
+	return 0;
+}
+
+#endif // !KASA_CUSTOM
 
 #endif // MAIN_H_
